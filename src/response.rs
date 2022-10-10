@@ -242,11 +242,11 @@ where
     }
 
     /// The current `Content-Length` threshold for switching over to
-    /// chunked transfer. The default is 32768 bytes. Notice that
+    /// chunked transfer. The default is none. Notice that
     /// chunked transfer is mutually exclusive with sending a
     /// `Content-Length` header as per the HTTP spec.
     pub fn chunked_threshold(&self) -> usize {
-        self.chunked_threshold.unwrap_or(32768)
+        self.chunked_threshold.unwrap_or(usize::MAX)
     }
 
     /// Adds a header to the list.
@@ -389,17 +389,18 @@ where
 
         // if the transfer encoding is identity, the content length must be known ; therefore if
         // we don't know it, we buffer the entire response first here
-        // while this is an expensive operation, it is only ever needed for clients using HTTP 1.0
-        let (mut reader, data_length) = match (self.data_length, transfer_encoding) {
-            (Some(l), _) => (Box::new(self.reader) as Box<dyn Read>, Some(l)),
-            (None, Some(TransferEncoding::Identity)) => {
-                let mut buf = Vec::new();
-                self.reader.read_to_end(&mut buf)?;
-                let l = buf.len();
-                (Box::new(Cursor::new(buf)) as Box<dyn Read>, Some(l))
-            }
-            _ => (Box::new(self.reader) as Box<dyn Read>, None),
-        };
+        // we display an error.
+        let (mut reader, data_length): (Box<dyn Read>, _) =
+            match (self.data_length, transfer_encoding) {
+                (Some(l), _) => (Box::new(self.reader), Some(l)),
+                (None, Some(TransferEncoding::Identity)) => {
+                    self.status_code = StatusCode(417);
+                    let buffer = b"HTTP/1.1 Required".to_vec();
+                    let l = buffer.len();
+                    (Box::new(Cursor::new(buffer)), Some(l))
+                }
+                _ => (Box::new(self.reader), None),
+            };
 
         // checking whether to ignore the body of the response
         let do_not_send_body = do_not_send_body
